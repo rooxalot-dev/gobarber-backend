@@ -1,6 +1,6 @@
 import app from './app';
 
-let { PORT } = process.env; 
+let { PORT } = process.env;
 
 PORT = PORT || 3333;
 
