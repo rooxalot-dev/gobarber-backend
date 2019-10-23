@@ -18,7 +18,7 @@ module.exports = {
     "class-methods-use-this": "off",
     "no-param-reassign": "off",
     "camelcase": "off",
-    "sort-imports": "off",
+    "import/order": "off",
     "linebreak-style": 0,
     "no-console": 0,
     "no-tabs": 0,
