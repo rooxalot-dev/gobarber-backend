@@ -3,7 +3,8 @@ import User from '../models/user';
 import File from '../models/file';
 import Notification from '../schemas/notification';
 
-import Mail from '../../lib/mail';
+import Queue from '../../lib/queue';
+import CancellationJob from '../jobs/cancellationMailJob';
 
 import {
     startOfHour, parseISO, isBefore, format, subHours,
@@ -135,7 +136,6 @@ class AppointmentController {
                     },
                 ],
             });
-            const { Provider: provider, User: user } = appointment;
 
             if (!appointment) {
                 return res.status(400).json({ message: 'Appointment not found!' });
@@ -153,16 +153,8 @@ class AppointmentController {
             appointment.canceled_at = new Date();
             appointment.save();
 
-            const formattedAppointmentDate = format(appointment.date, "'dia' dd 'de' MMMM, 'ás' HH:mm'h'", { locale: pt });
-            await Mail.sendMail({
-                to: `${provider.name} <${provider.email}>`,
-                subject: 'Agendamento Cancelado =(',
-                template: 'cancellation',
-                context: {
-                    provider: provider.name,
-                    user: user.name,
-                    date: formattedAppointmentDate,
-                },
+            Queue.add(CancellationJob.key, {
+                appointment,
             });
 
             return res.json(appointment);
