@@ -1,8 +1,15 @@
 import Appointment from '../models/appointment';
 import User from '../models/user';
 import File from '../models/file';
+import Notification from '../schemas/notification';
 
-import { startOfHour, parseISO, isBefore } from 'date-fns';
+import Mail from '../../lib/mail';
+
+import {
+    startOfHour, parseISO, isBefore, format, subHours,
+} from 'date-fns';
+import pt from 'date-fns/locale/pt';
+
 import * as Yup from 'yup';
 
 class AppointmentController {
@@ -50,12 +57,19 @@ class AppointmentController {
                 });
             }
 
+            const { userId } = res.locals;
             const { provider_id, date } = req.body;
 
             const providerUser = await User.findOne({ where: { id: provider_id, provider: true } });
             if (!providerUser) {
                 res.status(401).json({
                     message: 'You can only create appointments with providers',
+                });
+            }
+
+            if (userId === provider_id) {
+                res.status(401).json({
+                    message: 'You can\'t create appointments with yourself!',
                 });
             }
 
@@ -80,9 +94,18 @@ class AppointmentController {
             }
 
             const appointment = await Appointment.create({
-                user_id: res.locals.userId,
+                user_id: userId,
                 provider_id,
-                hourStart,
+                date: hourStart,
+            });
+
+            const user = await User.findOne({ where: { id: userId, provider: false } });
+            const formattedAppointmentDate = format(hourStart, "'dia' dd 'de' MMMM, 'ás' HH:mm'h'", { locale: pt });
+            const notificationMessage = `Olá, o usuário ${user.name} fez um agendamento ${formattedAppointmentDate}`;
+
+            await Notification.create({
+                content: notificationMessage,
+                user: provider_id,
             });
 
             return res.json(appointment);
@@ -90,6 +113,61 @@ class AppointmentController {
             return res.status(500).json({
                 message: error.message || 'An error ocurred while creating the appointment!',
             });
+        }
+    }
+
+    async delete(req, res) {
+        const { id } = req.params;
+        const { userId } = res.locals;
+
+        try {
+            const appointment = await Appointment.findByPk(id, {
+                include: [
+                    {
+                        model: User,
+                        as: 'Provider',
+                        attributes: ['name', 'email'],
+                    },
+                    {
+                        model: User,
+                        as: 'User',
+                        attributes: ['name', 'email'],
+                    },
+                ],
+            });
+            const { Provider: provider, User: user } = appointment;
+
+            if (!appointment) {
+                return res.status(400).json({ message: 'Appointment not found!' });
+            }
+
+            if (appointment.user_id !== userId) {
+                return res.status(401).json({ message: 'You don\'t have permission to cancel this appointment!' });
+            }
+
+            const subDate = subHours(Appointment.date, 2);
+            if (new Date() > subDate) {
+                return res.status(400).json({ message: 'You can only cancel appointments up to two hours in advance!' });
+            }
+
+            appointment.canceled_at = new Date();
+            appointment.save();
+
+            const formattedAppointmentDate = format(appointment.date, "'dia' dd 'de' MMMM, 'ás' HH:mm'h'", { locale: pt });
+            await Mail.sendMail({
+                to: `${provider.name} <${provider.email}>`,
+                subject: 'Agendamento Cancelado =(',
+                template: 'cancellation',
+                context: {
+                    provider: provider.name,
+                    user: user.name,
+                    date: formattedAppointmentDate,
+                },
+            });
+
+            return res.json(appointment);
+        } catch (error) {
+            return res.status(500).json({ message: error.message });
         }
     }
 }
